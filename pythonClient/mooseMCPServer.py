@@ -1,8 +1,28 @@
-from mcp.server.fastmcp import FastMCP
-import requests
-import json
+"""MCP server that exposes Moose analysis tools to LLM clients.
+
+This file is the bridge between the Model Context Protocol (MCP) world
+and the Moose (Pharo) analysis platform.  Every ``@mcp.tool()``
+decorated function translates an MCP tool call into a JSON-RPC request
+forwarded to the Moose server via :mod:`mooseRPCClient`.
+
+Usage::
+
+    python mooseMCPServer.py
+
+The server communicates over *stdio* (standard MCP transport).
+The Moose JSON-RPC server must be running on ``http://localhost:4444/``
+before any tool call is made.
+"""
+
 import logging
 
+from mcp.server.fastmcp import FastMCP
+
+from mooseRPCClient import callMooseServer
+
+# ---------------------------------------------------------------------------
+# Server & logging setup
+# ---------------------------------------------------------------------------
 
 mcp = FastMCP(name="MooseMCPServer")
 
@@ -10,303 +30,319 @@ logging.basicConfig(filename="mooseMCP.log", level=logging.INFO)
 logger = logging.getLogger("MooseMCPServer")
 
 
+# ----------------------------------------------------------------------------
+# T O O L S  -  L I S T
+# ----------------------------------------------------------------------------
 
-#----------------------------------------------------------------------------
-# T O O L S -- L I S T
-#----------------------------------------------------------------------------
-
-
-#----------------------------------------------------------------------------
 @mcp.tool()
-def listEntitiesForType(entityType : str) -> list[str]:
-    """Lists all the entities of a given type in a project.
+def listEntitiesForType(entityType: str) -> list[str]:
+    """List all entities of a given type in the loaded Moose project.
 
-    Args: 
-        The type as a string, for example, "Package", "Class", "Interface", or "Method".
-    Returns:
-        A list of strings naming all the entities of the given type in a moose project."""
-
-    return callMooseServer('list:entitiesForType', [entityType])
-
-#----------------------------------------------------------------------------
-@mcp.tool()
-def listEntityChildren(entity : str) -> list[str]:
-    """Lists all the children of an entity
     Args:
-        A string naming an entity, for example "fr.inria.moose.
+        entityType: The entity type as a string, for example ``"Package"``,
+                    ``"Class"``, ``"Interface"``, or ``"Method"``.
+
     Returns:
-        A list of strings naming all the children of the given entity."""
+        A list of strings naming all entities of the requested type.
+    """
+    return callMooseServer("list:entitiesForType", [entityType])
 
-    return callMooseServer('list:entityChildren', [entity])
 
-#----------------------------------------------------------------------------
 @mcp.tool()
-def listEntityClients(entity : str) -> list[str]:
-     """Lists all the clients of an entity, ie. all other entities that depend on this one
-     Args:
-        A string naming an entity
-     Returns:
-        A list of strings naming all the clients of the given entity."""
+def listEntityChildren(entity: str) -> list[str]:
+    """List all direct children of an entity.
 
-     return callMooseServer('list:entityClients', [entity])
+    Args:
+        entity: A string naming an entity, for example
+                ``"fr.inria.moose"``.
 
-#----------------------------------------------------------------------------
+    Returns:
+        A list of strings naming all children of the given entity.
+    """
+    return callMooseServer("list:entityChildren", [entity])
+
+
 @mcp.tool()
-def listEntityProviders(entity : str) -> list[str]:
-     """Lists all the clients of an entity, ie. all other entities that this one depends on
-     Args:
-        A string naming an entity
-     Returns:
-        A list of strings naming all the providers for the given entity."""
+def listEntityClients(entity: str) -> list[str]:
+    """List all clients of an entity.
 
-     return callMooseServer('list:entityProviders', [entity])
+    A *client* is any other entity that depends on (uses) the given one.
 
-#----------------------------------------------------------------------------
+    Args:
+        entity: A string naming an entity.
+
+    Returns:
+        A list of strings naming all clients of the given entity.
+    """
+    return callMooseServer("list:entityClients", [entity])
+
+
 @mcp.tool()
-def listEntityParents(entity : str) -> list[str]:
-     """Lists all the parents of an entity. Typically there is only one parent per entity
-     Args:
-        A string naming an entity
-     Returns:
-        A list of strings naming all the parents for the given entity."""
+def listEntityProviders(entity: str) -> list[str]:
+    """List all providers of an entity.
 
-     return callMooseServer('list:entityParents', [entity])
+    A *provider* is any other entity that the given one depends on.
 
-#----------------------------------------------------------------------------
+    Args:
+        entity: A string naming an entity.
+
+    Returns:
+        A list of strings naming all providers of the given entity.
+    """
+    return callMooseServer("list:entityProviders", [entity])
+
+
+@mcp.tool()
+def listEntityParents(entity: str) -> list[str]:
+    """List the parents of an entity.
+
+    Typically there is only one parent per entity.
+
+    Args:
+        entity: A string naming an entity.
+
+    Returns:
+        A list of strings naming all parents of the given entity.
+    """
+    return callMooseServer("list:entityParents", [entity])
+
+
 @mcp.tool()
 def listEntityTypes() -> list[str]:
-    """Lists all the types of entities in a moose project
-    Args:
-        None
+    """List all entity types present in the loaded Moose project.
+
     Returns:
-        A list of strings naming all the entity types in the project."""
+        A list of strings naming all entity types in the project.
+    """
+    return callMooseServer("list:entityTypes", [])
 
-    return callMooseServer('list:entityTypes', [])
 
-
-#----------------------------------------------------------------------------
 @mcp.tool()
-def listEntityProperty(entity : str)-> list[str]:
-    """CLists all the properties of an entity.
-     Args:
-        A string naming an entity
-     Returns:
-        A list of strings naming all the properties for the given entity."""
+def listEntityProperty(entity: str) -> list[str]:
+    """List all properties of an entity.
 
-    return callMooseServer('list:entityProperties', [entity])
-
-#----------------------------------------------------------------------------
-# T O O L S -- R E Q U E S T S
-#----------------------------------------------------------------------------
-
-
-#----------------------------------------------------------------------------
-@mcp.tool()
-def requestEntitylName(entity : str) -> str:
-    """Gets the fully qualified name of the entity in parameter
     Args:
-        A string naming an entity
+        entity: A string naming an entity.
+
     Returns:
-        A string with the fully qualified name of the given entity."""
+        A list of strings naming all properties of the given entity.
+    """
+    return callMooseServer("list:entityProperties", [entity])
 
-    return callMooseServer('request:entityName', [entity])
 
-#----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# T O O L S  -  R E Q U E S T S
+# ----------------------------------------------------------------------------
+
 @mcp.tool()
-def requestEntityType(entity : str) -> str:
-    """Gets the type of the entity in parameter
+def requestEntityName(entity: str) -> str:
+    """Get the fully qualified name of an entity.
+
     Args:
-        A string naming an entity
+        entity: A string naming an entity.
+
     Returns:
-        A string naming the type of the entity in parameter."""
+        The fully qualified name of the given entity.
+    """
+    return callMooseServer("request:entityName", [entity])
 
-    return callMooseServer('request:entityType', [entity])
 
-#----------------------------------------------------------------------------
+@mcp.tool()
+def requestEntityType(entity: str) -> str:
+    """Get the type of an entity.
+
+    Args:
+        entity: A string naming an entity.
+
+    Returns:
+        A string naming the type of the given entity.
+    """
+    return callMooseServer("request:entityType", [entity])
+
+
 @mcp.tool()
 def requestModelName() -> str:
-    """Gets the name of the current moose project
-    Args:
-        None
+    """Get the name of the currently loaded Moose project.
+
     Returns:
-        A string naming the current project."""
+        A string naming the current project.
+    """
+    return callMooseServer("request:modelName", [])
 
-    return callMooseServer('request:modelName', [])
 
-#----------------------------------------------------------------------------
 @mcp.tool()
 def requestModelRepository() -> str:
-    """Gets the github repository of a moose project
-    Args:
-        None
+    """Get the GitHub repository URL of the currently loaded Moose project.
+
     Returns:
-        The github repository of the project."""
+        The GitHub repository URL of the project.
+    """
+    return callMooseServer("request:modelRepository", [])
 
-    return callMooseServer('request:modelRepository', [])
 
-#----------------------------------------------------------------------------
 @mcp.tool()
 def requestModelSize() -> str:
-    """Gets the number of entities in a moose project
-    Args:
-        None
+    """Get the total number of entities in the currently loaded Moose project.
+
     Returns:
-        The total number of entities in the project."""
+        The total number of entities in the project.
+    """
+    return callMooseServer("request:modelSize", [])
 
-    return callMooseServer('request:modelSize', [])
 
-#----------------------------------------------------------------------------
-# T O O L S -- P R O P E R T I E S
-#----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# T O O L S  -  P R O P E R T I E S  /  M E T R I C S
+# ----------------------------------------------------------------------------
 
-#----------------------------------------------------------------------------
 @mcp.tool()
-def metricPackageCohesion(entity : str) -> float:
-    """Gets the cohesion (as defined by the Robert C. Martin) of the package in parameter.
-    Martin's cohesion ranges between 0 and 1, the higher the better.
+def metricPackageCohesion(entity: str) -> float:
+    """Get the Martin cohesion of a package.
+
+    Martin's cohesion ranges between 0 and 1; the higher, the better.
+
     Args:
-        A string naming a package
+        entity: A string naming a package.
+
     Returns:
-        Martin's cohesion for the package in parameter."""
+        Martin's cohesion value for the given package.
+    """
+    return callMooseServer("property:packageCohesion", [entity])
 
-    return callMooseServer('property:packageCohesion', [entity])
 
-
-#----------------------------------------------------------------------------
 @mcp.tool()
-def metricPackageCoupling(entity : str) -> int:
-    """Gets the efferent coupling (as defined by the Robert C. Martin) of the package in parameter.
-    Martin's efferent coupling is a positive integer, the lower the better.
+def metricPackageCoupling(entity: str) -> int:
+    """Get the Martin efferent coupling of a package.
+
+    Martin's efferent coupling is a non-negative integer; the lower,
+    the better.
+
     Args:
-        A string naming a package
+        entity: A string naming a package.
+
     Returns:
-        Martin's efferent coupling for the package in parameter."""
+        Martin's efferent coupling for the given package.
+    """
+    return callMooseServer("property:packageCoupling", [entity])
 
-    return callMooseServer('property:packageCoupling', [entity])
 
-#----------------------------------------------------------------------------
 @mcp.tool()
-def metricClassLackOfCohesion(entity : str) -> float:
-    """Gets the value of the Lack of Cohesion (LCOM) metric for the class in parameter.
+def metricClassLackOfCohesion(entity: str) -> float:
+    """Get the Lack of Cohesion in Methods (LCOM) metric for a class.
+
     Args:
-        A string naming a class
+        entity: A string naming a class.
+
     Returns:
-        LCOM value for the class in parameter."""
+        The LCOM value for the given class.
+    """
+    return callMooseServer("property:classLackOfCohesion", [entity])
 
-    return callMooseServer('property:classLackOfCohesion', [entity])
 
-#----------------------------------------------------------------------------
 @mcp.tool()
-def metricMethodNumberOfStatements(entity : str) -> float:
-    """Gets the number of statements for the method in parameter.
+def metricMethodNumberOfStatements(entity: str) -> float:
+    """Get the number of statements in a method.
+
     Args:
-        A string naming a method
+        entity: A string naming a method.
+
     Returns:
-        Number of statements for the method in parameter."""
+        The number of statements in the given method.
+    """
+    return callMooseServer("property:methodNumberOfStatements", [entity])
 
-    return callMooseServer('property:methodNumberOfStatements', [entity])
 
-#----------------------------------------------------------------------------
 @mcp.tool()
-def metricMethodCyclomaticComplexity(entity : str) -> float:
-    """Gets the cyclomatic complexity for the method in parameter.
+def metricMethodCyclomaticComplexity(entity: str) -> float:
+    """Get the cyclomatic complexity of a method.
+
     Args:
-        A string naming a method
+        entity: A string naming a method.
+
     Returns:
-        Cyclomatic complexity value for the method in parameter."""
+        The cyclomatic complexity of the given method.
+    """
+    return callMooseServer("property:methodCyclomaticComplexity", [entity])
 
-    return callMooseServer('property:methodCyclomaticComplexity', [entity])
 
-
-#----------------------------------------------------------------------------
 @mcp.tool()
-def hasProperty(entity : str, property : str) -> bool:
+def hasProperty(entity: str, property: str) -> bool:
     """Check whether a given entity has a given property.
+
     Args:
-        - A string naming an entity
-        - A property name
+        entity: A string naming an entity.
+        property: A property name.
+
     Returns:
-        true or false, whther the entity has the given property or not."""
+        ``True`` if the entity has the given property, ``False`` otherwise.
+    """
+    return callMooseServer("property:hasProperty", [entity, property])
 
-    return callMooseServer('property:hasProperty', [entity, property])
 
-#----------------------------------------------------------------------------
-# T O O L S -- M I S C
-#----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# T O O L S  -  M E M O R Y
+# ----------------------------------------------------------------------------
 
-#----------------------------------------------------------------------------
 @mcp.tool()
-def memorySet(name : str, entities : list[str]) -> int:
-    """Associates a key to a list of entities.
+def memorySet(name: str, entities: list[str]) -> int:
+    """Associate a key with a list of entities in the Moose server memory.
+
     Args:
-        - A key
-        - A list of entities
+        name: A key string.
+        entities: A list of entity names to associate with the key.
+
     Returns:
-        The number of entities in the list."""
+        The number of entities stored under the given key.
+    """
+    return callMooseServer("memory:set", [name, entities])
 
-    return callMooseServer('memory:set', [name, entities])
 
-#----------------------------------------------------------------------------
 @mcp.tool()
-def memoryGet(name : str) -> list[str]:
-    """Recovers a list of entities from its associated key
+def memoryGet(name: str) -> list[str]:
+    """Retrieve a list of entities from the Moose server memory by key.
+
     Args:
-        The key associated to the list
+        name: The key associated with the list.
+
     Returns:
-        A list of entities"""
+        A list of entity names stored under the given key.
+    """
+    return callMooseServer("memory:get", [name])
 
-    return callMooseServer('memory:get', [name])
 
-#----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
 # R E S O U R C E S
-#----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
 
-#----------------------------------------------------------------------------
-# `dict' return type automatically translates to mime_type="application/json"
+# `dict` return type is automatically serialised as mime_type="application/json"
 @mcp.resource("resource://model-report")
 def resourceModelReport() -> dict:
-    """Provides a summary report on the model:
-       - raw number of entities of various type (package, class, method)
-       - number of 'large' entities
-       - number of 'complex' entities."""
-    
-    return callMooseServer('resource:model-report', [])
+    """Provide a summary report on the loaded Moose model.
 
-#----------------------------------------------------------------------------
-@mcp.resource( uri="resource://package-dsm", mime_type="image/png")
+    The report includes:
+
+    - Raw counts of entities by type (package, class, method, ...)
+    - Number of "large" entities
+    - Number of "complex" entities
+
+    Returns:
+        A dict that is serialised as JSON.
+    """
+    return callMooseServer("resource:model-report", [])
+
+
+@mcp.resource(uri="resource://package-dsm", mime_type="image/png")
 def resourcePackageDSM() -> bytes:
-    """A picture of a Dependency Structural Matrix (DSM) of all the packages in the model."""
-    
-    return callMooseServer('resource:package-dsm', [])
+    """Provide a Dependency Structure Matrix (DSM) image for all packages.
+
+    Returns:
+        A PNG image of the package DSM as raw bytes.
+    """
+    return callMooseServer("resource:package-dsm", [])
 
 
+# ----------------------------------------------------------------------------
+# E N T R Y   P O I N T
+# ----------------------------------------------------------------------------
 
-#----------------------------------------------------------------------------
-# U T I L I T I E S
-#----------------------------------------------------------------------------
-def callMooseServer(command: str, args: list):
-
-    logger.debug("call MooseServer:%s(%s)/", command, args)
-
-    payload = {
-        "method": command,
-        "params": args,
-        "jsonrpc": "2.0",
-        "id": 1,
-    }
-
-    response = requests.post(
-        url, data=json.dumps(payload), headers=headers).json()
-
-    logger.debug("MooseServer answer:%s/", response)
-
-    return response["result"]
-
-
-#----------------------------------------------------------------------------
 if __name__ == "__main__":
-
-    url = "http://localhost:4444/"
-    headers = {'content-type': 'application/json'}
-
     mcp.run(transport="stdio")

@@ -1,22 +1,58 @@
-This is a (python) client for the MooseMCP server
+# pythonClient – MooseMCP Python package
 
-To run it just do: `pyton mooseMCPClient.py`
-It assumes there is a MooseMCP server listening on 127.0.0.1:4444
+This directory contains the Python side of the MooseMCP project.
+It acts as a *client* to the Moose JSON-RPC server running in Pharo,
+and simultaneously exposes those capabilities as an *MCP server* to
+LLM clients such as Claude Desktop.
 
-# Installing
+## Module overview
 
-- Download the directory
-- initialize the project with `uv venv`
-- download requirements: `uv add -r requirements.txt`
-- activate it with `source .venv/bin/activate`
-- You must create a `.env` file declaring what is your GROQ API key:
-  `GROQ_API_KEY="... put your GROQ API key here ..."`
+| File | Role |
+|------|------|
+| `mooseRPCClient.py` | Low-level JSON-RPC transport to the Moose (Pharo) server. All MCP tools delegate to `callMooseServer()` defined here. |
+| `mooseMCPServer.py` | MCP server (stdio transport). Declares every Moose analysis tool with `@mcp.tool()` and forwards calls to `mooseRPCClient`. |
+| `mathServer.py` | Optional standalone MCP server for basic arithmetic / comparisons. Can be registered alongside `mooseMCPServer` in any MCP client. |
+| `mooseMCPClient.py` | Interactive LLM client using [Groq](https://groq.com) / Qwen. Starts a question loop and delegates to the MCP tools. |
+| `mistralClient.py` | Alternative interactive client using a local [Ollama](https://ollama.com) model via the OpenAI-compatible API. Manages the tool-call cycle manually. |
 
-# Running
+## Installing
 
-The MooseMCP server must be running on 127.0.0.1:4444
-Look at the instruction on the pharo image to understand how to do that
+```sh
+uv venv
+uv add -r requirements.txt
+```
 
-The client is just a loop interaction with the user asking for a question and passing it to qwen LLM that will handle it with the help of the MooseMCP server.
+You must also create a `.env` file declaring your Groq API key:
 
-You can finish it with the `quit` instruction ("question")
+```
+GROQ_API_KEY="... your key here ..."
+```
+
+## Running
+
+1. Start the Moose image and load your Famix model, then start the
+   JSON-RPC server from the Pharo side:
+
+   ```st
+   server := MMCPToolServer new mooseModel: <the-moose-model>; yourself.
+   server start.
+   ```
+
+2. Start the Python client:
+
+   ```sh
+   python mooseMCPClient.py   # Groq / Qwen (default)
+   # or
+   python mistralClient.py    # local Ollama model
+   ```
+
+3. Type your questions at the prompt.  Enter `quit` to exit.
+
+## Port configuration
+
+The Moose JSON-RPC server port is **4444** by default.  It is
+configured in two places:
+
+* **Python** – `mooseRPCClient.MOOSE_URL` (default `http://localhost:4444/`).
+  Override it at runtime with `mooseRPCClient.configure(url)`.
+* **Pharo** – `MMCPServer >> defaultPort`.

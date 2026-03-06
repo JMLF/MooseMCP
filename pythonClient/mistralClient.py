@@ -1,152 +1,215 @@
+"""Alternative LLM client using a local Ollama model via the OpenAI-compatible API.
+
+This client connects to a locally running `Ollama <https://ollama.com>`_
+instance and uses it together with the Moose MCP server to answer
+questions about a software project.
+
+Unlike :mod:`mooseMCPClient` (which uses Groq), this client manages
+the full tool-call cycle manually:
+
+1. Send the user question to the LLM.
+2. If the LLM requests tool calls, execute them via the MCP session.
+3. Send the tool results back to the LLM.
+4. Print the final answer.
+
+Requirements
+------------
+- A running Ollama instance on ``http://localhost:11434``.
+- The model specified in :func:`interaction_loop` pulled locally
+  (default: ``llama3.1:8b``).
+- The Moose JSON-RPC server running on ``http://localhost:4444/``.
+
+Usage::
+
+    python mistralClient.py
+"""
+
 import asyncio
-from openai import OpenAI
 import json
+import logging
+
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-import logging
+from openai import OpenAI
 
 logging.basicConfig(filename="mooseMCP.log", level=logging.CRITICAL)
 logger = logging.getLogger("mistralClient")
 
 
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Helper utilities
+# ---------------------------------------------------------------------------
 
 def mcp_tools_to_openai(tools):
-  openai_tools = []
-  for tool in tools:
-    openai_tools.append({
-      "type": "function",
-      "function": {
-        "name": tool.name,
-        "description": tool.description or "",
-        "parameters": tool.inputSchema,
-      }
-    })
-  return openai_tools
+    """Convert MCP tool descriptors to the OpenAI function-calling schema.
 
-# ----------------------------------------------------------------------------
-def ask_llm(openAI, llm, tools, message) :
+    Args:
+        tools: A list of MCP tool objects as returned by
+               ``mcp_session.list_tools()``.
 
-    logger.debug("Asking model:%s/", message)
+    Returns:
+        A list of dicts in the OpenAI ``tools`` array format.
+    """
+    openai_tools = []
+    for tool in tools:
+        openai_tools.append({
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": tool.description or "",
+                "parameters": tool.inputSchema,
+            }
+        })
+    return openai_tools
+
+
+def ask_llm(openAI, llm, tools, message):
+    """Send a chat completion request to the LLM.
+
+    Args:
+        openAI: An :class:`openai.OpenAI` client instance.
+        llm: Model name string (e.g. ``"llama3.1:8b"``).
+        tools: List of tool descriptors in the OpenAI schema.
+        message: The conversation history as a list of message dicts.
+
+    Returns:
+        The raw completion response object.
+    """
+    logger.debug("Asking model: %s", message)
     response = openAI.chat.completions.create(
-      model = llm,
-      messages = message,
-      tools = tools,
-      tool_choice = "force",
-      temperature = 0.2,
-#      top_p = 0.9,
-#      max_tokens = 512,
-#      presence_penalty = 0.5
-#      frequency_penalty = 0.3
+        model=llm,
+        messages=message,
+        tools=tools,
+        tool_choice="force",
+        temperature=0.2,
     )
     return response
 
 
-# ----------------------------------------------------------------------------
-async def call_tools(mcp_session, tool_calls) :
-  answer = []
+async def call_tools(mcp_session, tool_calls):
+    """Execute a list of MCP tool calls and collect their results.
 
-  for tool in tool_calls :
-    logger.debug("tool call:%s/", str(tool))
-    tool_answer = await mcp_session.call_tool(
-      tool.function.name,
-      json.loads(tool.function.arguments),
-    )
-    logger.debug("tool answer:%s/", str(tool_answer))
+    Args:
+        mcp_session: An active :class:`mcp.ClientSession`.
+        tool_calls: The ``tool_calls`` list from the LLM response message.
 
-    answer.append({
-      "role": "tool",
-      "tool_name": tool.function.name,
-      "content": str(tool_answer),
-    })
+    Returns:
+        A list of ``{"role": "tool", ...}`` message dicts ready to be
+        appended to the conversation history.
+    """
+    answer = []
+    for tool in tool_calls:
+        logger.debug("tool call: %s", str(tool))
+        tool_answer = await mcp_session.call_tool(
+            tool.function.name,
+            json.loads(tool.function.arguments),
+        )
+        logger.debug("tool answer: %s", str(tool_answer))
+        answer.append({
+            "role": "tool",
+            "tool_name": tool.function.name,
+            "content": str(tool_answer),
+        })
+    return answer
 
-  return answer
 
-# ----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Interaction loop
+# ---------------------------------------------------------------------------
+
 async def interaction_loop(mcp_session, openAI, tools):
-  """Interaction loop with user
-   - Get question from user
-   - Send it to the LLM server
-   - Get the answer from the LLM server (should ask for tool calls)
-   - call the tools
-   - Send the tool(s) answer(s) back to the LLM
-   - Print final answer"""
+    """Run the interactive question-answer loop with the user.
 
-  llm = "llama3.1:8b"
-#  llm = "mistral"
+    At each iteration:
 
-  while True :
+    1. The user enters a question.
+    2. The question is sent to the LLM together with the available tools.
+    3. If the LLM requests tool calls they are executed via the MCP session.
+    4. The tool results are sent back to the LLM for a final answer.
+    5. The final answer is printed.
 
-    print("\n=========================================================================")
+    Type ``quit`` to exit.
 
-#    question = input("Question: ")
-    question = "what are the packages in the project"
-    if (question == "quit") :
-      break
+    Args:
+        mcp_session: An active :class:`mcp.ClientSession`.
+        openAI: An :class:`openai.OpenAI` client instance.
+        tools: List of tool descriptors in the OpenAI schema.
+    """
+    llm = "llama3.1:8b"
 
-#        { "role": "system", "content": "You are an AI agent. You MUST call the provided tools to answer questions. Do not compute answers yourself. Always wait for tool results before responding." },
-    message = [
-        {"role": "user", "content": question }
-    ]
-    response = ask_llm(openAI, llm, tools, message)
+    while True:
+        print("\n=========================================================================")
 
-    llm_answer = response.choices[0].message
-    logger.debug("Model answer:%s/", str(llm_answer))
+        question = input("Question: ")
+        if question == "quit":
+            break
 
-    # did model require tool(s)
-    if not llm_answer.tool_calls :
-      "if not, give answer directly"
-      print("Answer:", message.content)
-    else:
-      "if it did, call tool(s) and send answers back to model"
-      message.append(llm_answer)
+        message = [
+            {"role": "user", "content": question}
+        ]
+        response = ask_llm(openAI, llm, tools, message)
 
-      response = await call_tools(mcp_session, llm_answer.tool_calls)
-      for tool_answer in response :
-        message.append(tool_answer)
+        llm_answer = response.choices[0].message
+        logger.debug("Model answer: %s", str(llm_answer))
 
-      # Send tool result back to model
-      logger.debug("tool answer to LLM:%s/", message)
-      final = openAI.chat.completions.create(
-        model = llm,
-        messages = message,
-      )
+        if not llm_answer.tool_calls:
+            # No tool call requested – print the direct answer.
+            print("Answer:", llm_answer.content)
+        else:
+            # Execute requested tool calls and send results back to the LLM.
+            message.append(llm_answer)
 
-      print("Answer:%s/", final.choices[0].message.content)
+            tool_responses = await call_tools(mcp_session, llm_answer.tool_calls)
+            for tool_answer in tool_responses:
+                message.append(tool_answer)
 
-    return
+            # Request the final answer incorporating the tool results.
+            logger.debug("tool answer to LLM: %s", message)
+            final = openAI.chat.completions.create(
+                model=llm,
+                messages=message,
+            )
 
+            print(f"Answer: {final.choices[0].message.content}")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
 # ---------------------------------------------------------------------------
 
 async def main():
-  """Main function
-   - Create connection to the LLM server
-   - Register the MCP tools
-   - Start interaction loop with user"""
+    """Start the MCP server subprocess, connect, and run the interaction loop.
 
-  # 1. Start MCP server process
-  server_params = StdioServerParameters(
-    command=".venv/bin/python",
-    args=["mooseMCPServer.py"],
-  )
+    Steps:
 
-  async with stdio_client(server_params) as (read, write):
-    async with ClientSession(read, write) as mcp_session:
-      await mcp_session.initialize()
+    1. Launch :mod:`mooseMCPServer` as a subprocess.
+    2. Initialise an MCP client session.
+    3. Retrieve and convert the available MCP tools.
+    4. Connect to the local Ollama server.
+    5. Enter the interaction loop.
+    """
+    server_params = StdioServerParameters(
+        command=".venv/bin/python",
+        args=["mooseMCPServer.py"],
+    )
 
-      # 2. Get MCP tools in OpenAI-style schema
-      list_tools_result = await mcp_session.list_tools()
-      tools = mcp_tools_to_openai(list_tools_result.tools)
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as mcp_session:
+            await mcp_session.initialize()
 
-      # 3. Local LLM via Ollama (OpenAI-compatible)
-      openAI = OpenAI(
-        base_url="http://localhost:11434/v1",
-        api_key="ollama",  # dummy value, not used
-      )
+            # Retrieve and convert MCP tools to the OpenAI schema.
+            list_tools_result = await mcp_session.list_tools()
+            tools = mcp_tools_to_openai(list_tools_result.tools)
 
-      # 4. Interaction loop
-      await interaction_loop(mcp_session, openAI, tools)
+            # Connect to the local Ollama instance (OpenAI-compatible API).
+            openAI = OpenAI(
+                base_url="http://localhost:11434/v1",
+                api_key="ollama",  # dummy value – not checked by Ollama
+            )
+
+            await interaction_loop(mcp_session, openAI, tools)
+
 
 # ----------------------------------------------------------------------------
 if __name__ == "__main__":
-  asyncio.run(main())
+    asyncio.run(main())
